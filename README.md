@@ -51,6 +51,7 @@
 }
 ```
 ```nix
+# 请不要直接运行
 sudo nixos-rebuild switch --flake .#my-machine
 ```
 
