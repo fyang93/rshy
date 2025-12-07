@@ -34,7 +34,18 @@ let
       else
         [ ]
     ) (builtins.attrNames entries);
-  inferTarget = system: if lib.hasSuffix "-darwin" system then "darwin" else "nixos";
+
+  inferTargetBySystem = system: if lib.hasSuffix "-darwin" system then "darwin" else "nixos";
+
+  inferTargetByPath =
+    path:
+      if lib.hasInfix "/home/" path then
+        "home"
+      else if lib.hasInfix "/darwin/" path then
+        "darwin"
+      else
+        "nixos"; # default
+
   getInstantiate =
     name: target:
     if target == "nixos" then
@@ -76,10 +87,12 @@ let
         throw "rshy: node '${name}' (target=home) requires home-manager input"
     else
       throw "rshy: node '${name}' has invalid target '${target}'";
+
   coreModule =
     { config, ... }:
     let
-      getTarget = node: if node.target != null then node.target else inferTarget node.system;
+      getTarget = node: if node.target != null then node.target else inferTargetBySystem node.system;
+
       filterNulls =
         attrs:
         lib.filterAttrs (_: v: v != null) (
@@ -128,6 +141,12 @@ let
     in
     {
       options = {
+        _inferredTarget = lib.mkOption {
+          type = lib.types.enum [ "nixos" "darwin" "home" ];
+          default = "nixos";
+          internal = true;
+        };
+
         systems = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [
@@ -151,6 +170,7 @@ let
                     "darwin"
                     "home"
                   ];
+                  default = lib.mkDefault config._inferredTarget;
                 };
                 module = lib.mkOption { type = lib.types.raw; };
               };
@@ -259,9 +279,17 @@ let
         // args;
       };
     };
+
   evaluated = lib.evalModules {
-    modules = map import (scan src) ++ [ coreModule ];
+    modules =
+      (map (path: {
+        _inferredTarget = inferTargetByPath path;
+        imports = [ (import path) ];
+      }) (scan src))
+
+      ++ [ coreModule ];
   };
+
   failedAssertions = builtins.filter (a: !a.assertion) evaluated.config.assertions;
 in
 assert
