@@ -35,16 +35,7 @@ let
         [ ]
     ) (builtins.attrNames entries);
 
-  inferTargetBySystem = system: if lib.hasSuffix "-darwin" system then "darwin" else "nixos";
-
-  inferTargetByPath =
-    path:
-      if lib.hasInfix "/home/" path then
-        "home"
-      else if lib.hasInfix "/darwin/" path then
-        "darwin"
-      else
-        "nixos"; # default
+  inferTarget = system: if lib.hasSuffix "-darwin" system then "darwin" else "nixos";
 
   getInstantiate =
     name: target:
@@ -89,9 +80,9 @@ let
       throw "rshy: node '${name}' has invalid target '${target}'";
 
   coreModule =
-    { config, ... }:
+    { config, lib, _inferredTarget ? "nixos", ... }:
     let
-      getTarget = node: if node.target != null then node.target else inferTargetBySystem node.system;
+      getTarget = node: if node.target != null then node.target else inferTarget node.system;
 
       filterNulls =
         attrs:
@@ -141,12 +132,6 @@ let
     in
     {
       options = {
-        _inferredTarget = lib.mkOption {
-          type = lib.types.enum [ "nixos" "darwin" "home" ];
-          default = "nixos";
-          internal = true;
-        };
-
         systems = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [
@@ -170,7 +155,7 @@ let
                     "darwin"
                     "home"
                   ];
-                  default = lib.mkDefault config._inferredTarget;
+                  default = lib.mkDefault _inferredTarget;
                 };
                 module = lib.mkOption { type = lib.types.raw; };
               };
@@ -282,11 +267,20 @@ let
 
   evaluated = lib.evalModules {
     modules =
-      (map (path: {
-        _inferredTarget = inferTargetByPath path;
-        imports = [ (import path) ];
-      }) (scan src))
-
+      (map (path:
+        let
+          inferredTarget =
+            if lib.hasInfix "/home/" (toString path) then "home"
+            else if lib.hasInfix "/darwin/" (toString path) then "darwin"
+            else "nixos";
+        in
+        {
+          _module.args = {
+            _inferredTarget = inferredTarget;
+          };
+          imports = [ (import path) ];
+        }
+      ) (scan src))
       ++ [ coreModule ];
   };
 
